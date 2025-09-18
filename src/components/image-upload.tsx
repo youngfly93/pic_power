@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Upload, X, Image as ImageIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -40,7 +40,6 @@ export function ImageUpload({ onImagesChange, maxImages = 4, disabled = false, o
         const result = e.target?.result as string;
         setPreviews((prev) => {
           const updated = [...prev, result].slice(0, maxImages);
-          onPreviewsUpdate?.(updated);
           return updated;
         });
       };
@@ -114,6 +113,11 @@ export function ImageUpload({ onImagesChange, maxImages = 4, disabled = false, o
     setPreviews([]);
     onImagesChange([]);
   }, [onImagesChange]);
+
+  // 同步预览到父组件，避免在 render 阶段触发上层 setState
+  useEffect(() => {
+    onPreviewsUpdate?.(previews);
+  }, [previews, onPreviewsUpdate]);
 
   return (
     <div className="space-y-4">

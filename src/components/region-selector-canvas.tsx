@@ -31,7 +31,8 @@ export function RegionSelectorCanvas({ imageSrc, onMaskChange, className }: Regi
     if (!img) return;
     const box = img.getBoundingClientRect();
     setDisplaySize({ width: box.width, height: box.height });
-    setImgOffset({ left: box.left + window.scrollX, top: box.top + window.scrollY });
+    // 使用 viewport 坐标配合 clientX/clientY，不要叠加 scroll 偏移
+    setImgOffset({ left: box.left, top: box.top });
   }, []);
 
   useEffect(() => {
