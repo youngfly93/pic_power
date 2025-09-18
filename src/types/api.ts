@@ -47,7 +47,7 @@ export interface GeneratedImage {
   createdAt: Date;
   size: string;
   model: string;
-  type?: 'text-to-image' | 'image-to-image';
+  type?: 'text-to-image' | 'image-to-image' | 'local-edit';
   sourceImages?: string[];
 }
 
@@ -58,7 +58,7 @@ export interface GenerationHistory {
   createdAt: Date;
   status: 'pending' | 'completed' | 'failed';
   error?: string;
-  type?: 'text-to-image' | 'image-to-image';
+  type?: 'text-to-image' | 'image-to-image' | 'local-edit';
   sourceImages?: string[];
 }
 
@@ -71,7 +71,7 @@ export interface AppState {
   history: GenerationHistory[];
   currentImages: GeneratedImage[];
   error: string | null;
-  mode: 'text-to-image' | 'image-to-image';
+  mode: 'text-to-image' | 'image-to-image' | 'local-edit';
 }
 
 // 表单类型
@@ -82,6 +82,6 @@ export interface ImageGenerationForm {
   maxImages: number;
   watermark: boolean;
   referenceImages?: File[];
-  mode: 'text-to-image' | 'image-to-image';
+  mode: 'text-to-image' | 'image-to-image' | 'local-edit';
   seed?: number;
 }

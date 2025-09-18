@@ -12,9 +12,10 @@ interface ImageUploadProps {
   onImagesChange: (images: File[]) => void;
   maxImages?: number;
   disabled?: boolean;
+  onPreviewsUpdate?: (previews: string[]) => void;
 }
 
-export function ImageUpload({ onImagesChange, maxImages = 4, disabled = false }: ImageUploadProps) {
+export function ImageUpload({ onImagesChange, maxImages = 4, disabled = false, onPreviewsUpdate }: ImageUploadProps) {
   const [uploadedImages, setUploadedImages] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
 
@@ -38,8 +39,9 @@ export function ImageUpload({ onImagesChange, maxImages = 4, disabled = false }:
       reader.onload = (e) => {
         const result = e.target?.result as string;
         setPreviews((prev) => {
-          const updated = [...prev, result];
-          return updated.slice(0, maxImages);
+          const updated = [...prev, result].slice(0, maxImages);
+          onPreviewsUpdate?.(updated);
+          return updated;
         });
       };
       reader.readAsDataURL(file);

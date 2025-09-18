@@ -20,12 +20,14 @@ import {
   Settings,
   Wand2,
   Loader2,
-  Edit3
+  Edit3,
+  Crop
 } from 'lucide-react';
 import { useAppStore } from '@/store/app-store';
 import { AVAILABLE_MODELS, AVAILABLE_SIZES } from '@/lib/api';
 import { ImageGenerationForm } from '@/types/api';
 import { ImageUpload } from './image-upload';
+import { RegionSelectorCanvas } from './region-selector-canvas';
 
 export function ImageGenerationFormComponent() {
   const {
@@ -46,6 +48,8 @@ export function ImageGenerationFormComponent() {
   const [maxImages, setMaxImages] = useState(1);
   const [referenceImages, setReferenceImages] = useState<File[]>([]);
   const [seed, setSeed] = useState<number>(-1);
+  const [localBasePreview, setLocalBasePreview] = useState<string | null>(null);
+  const [localMaskPreview, setLocalMaskPreview] = useState<string | null>(null);
   const watermark = false; // 确保无水印
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -57,6 +61,11 @@ export function ImageGenerationFormComponent() {
 
     // 图片编辑模式需要有参考图片
     if (mode === 'image-to-image' && referenceImages.length === 0) {
+      return;
+    }
+
+    // 原型阶段：局部编辑不提交后端，仅导出遮罩
+    if (mode === 'local-edit') {
       return;
     }
 
@@ -113,8 +122,8 @@ export function ImageGenerationFormComponent() {
 
       <CardContent className="space-y-6">
         {/* 模式切换 */}
-        <Tabs value={mode} onValueChange={(value) => setMode(value as 'text-to-image' | 'image-to-image')}>
-          <TabsList className="grid w-full grid-cols-2">
+        <Tabs value={mode} onValueChange={(value) => setMode(value as 'text-to-image' | 'image-to-image' | 'local-edit')}>
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="text-to-image" className="flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
               文生图
@@ -122,6 +131,10 @@ export function ImageGenerationFormComponent() {
             <TabsTrigger value="image-to-image" className="flex items-center gap-2">
               <Edit3 className="h-4 w-4" />
               图片编辑
+            </TabsTrigger>
+            <TabsTrigger value="local-edit" className="flex items-center gap-2">
+              <Crop className="h-4 w-4" />
+              局部编辑（原型）
             </TabsTrigger>
           </TabsList>
 
@@ -132,6 +145,31 @@ export function ImageGenerationFormComponent() {
                 maxImages={4}
                 disabled={isGenerating}
               />
+            </TabsContent>
+
+            <TabsContent value="local-edit" className="mt-0 space-y-4">
+              <ImageUpload
+                onImagesChange={(files) => {
+                  setReferenceImages(files);
+                  setLocalMaskPreview(null);
+                }}
+                onPreviewsUpdate={(previews) => {
+                  setLocalBasePreview(previews[0] || null);
+                }}
+                maxImages={1}
+                disabled={isGenerating}
+              />
+              {localBasePreview && (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    拖拽选择局部区域，点击“生成遮罩预览”导出白/黑遮罩；当前阶段仅生成并预览遮罩，不提交后端。
+                  </p>
+                  <RegionSelectorCanvas
+                    imageSrc={localBasePreview}
+                    onMaskChange={(maskUrl) => setLocalMaskPreview(maskUrl)}
+                  />
+                </div>
+              )}
             </TabsContent>
             {/* 提示词输入 */}
             <div className="space-y-2">
@@ -283,7 +321,8 @@ export function ImageGenerationFormComponent() {
             disabled={
               isGenerating ||
               !currentPrompt.trim() ||
-              (mode === 'image-to-image' && referenceImages.length === 0)
+              (mode === 'image-to-image' && referenceImages.length === 0) ||
+              (mode === 'local-edit')
             }
           >
             {isGenerating ? (
@@ -297,6 +336,11 @@ export function ImageGenerationFormComponent() {
                   <>
                     <Sparkles className="mr-2 h-4 w-4" />
                     生成图片
+                  </>
+                ) : mode === 'local-edit' ? (
+                  <>
+                    <Crop className="mr-2 h-4 w-4" />
+                    局部编辑原型：请在上方生成遮罩
                   </>
                 ) : (
                   <>

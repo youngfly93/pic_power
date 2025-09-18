@@ -9,7 +9,7 @@ interface AppStore extends AppState {
   setPrompt: (prompt: string) => void;
   setSize: (size: '1K' | '2K' | '4K' | '1024x1024' | '1024x1536' | '1536x1024' | '1664x936' | '936x1664' | 'adaptive') => void;
   setModel: (model: string) => void;
-  setMode: (mode: 'text-to-image' | 'image-to-image') => void;
+  setMode: (mode: 'text-to-image' | 'image-to-image' | 'local-edit') => void;
   setError: (error: string | null) => void;
   clearError: () => void;
 
