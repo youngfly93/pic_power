@@ -16,6 +16,21 @@ export interface ImageGenerationRequest {
   seed?: number;
 }
 
+
+export interface ImageEditRequest {
+  model: string;
+  prompt: string;
+  size?: '1K' | '2K' | '4K' | '1024x1024' | '1024x1536' | '1536x1024' | '1664x936' | '936x1664' | 'adaptive';
+  // base64 data URL of the original image(s)
+  image: string[];
+  // base64 data URL of the mask (white=keep/black=edit，或相反，视服务而定)
+  mask: string;
+  response_format?: 'url' | 'b64_json';
+  n?: number;
+  watermark?: boolean;
+  seed?: number;
+}
+
 export interface ImageGenerationResponse {
   created: number;
   data: Array<{
@@ -81,7 +96,11 @@ export interface ImageGenerationForm {
   model: string;
   maxImages: number;
   watermark: boolean;
-  referenceImages?: File[];
+  referenceImages?: File[]; // image-to-image 模式
   mode: 'text-to-image' | 'image-to-image' | 'local-edit';
   seed?: number;
+  // 以下为 local-edit 模式专用
+  baseImageDataUrl?: string;
+  maskImageDataUrl?: string;
+  localEditRect?: { x: number; y: number; width: number; height: number };
 }

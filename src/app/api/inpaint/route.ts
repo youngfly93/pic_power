@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { ImageGenerationRequest, ImageGenerationResponse, ImageEditRequest } from '@/types/api';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { ImageEditRequest, ImageGenerationResponse } from '@/types/api';
 
 const API_BASE_URL = process.env.DOUBAO_API_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3';
 const API_KEY = process.env.DOUBAO_API_KEY as string;
@@ -8,22 +8,18 @@ export async function POST(request: NextRequest) {
   try {
     if (!API_KEY) {
       return NextResponse.json(
-        { error: { message: '服务器配置缺少 DOUBAO_API_KEY' } },
+        { error: { message: '服务端未配置 DOUBAO_API_KEY' } },
         { status: 500 }
       );
     }
 
-    const body = await request.json() as ImageGenerationRequest | ImageEditRequest;
+    const body: ImageEditRequest = await request.json();
 
-    // 根据是否包含 mask 字段判断是编辑还是生成
-    const isEdit = typeof (body as ImageEditRequest).mask === 'string' && Array.isArray((body as ImageEditRequest).image);
-    const endpoint = isEdit ? `${API_BASE_URL}/images/edits` : `${API_BASE_URL}/images/generations`;
-
-    const response = await fetch(endpoint, {
+    const response = await fetch(`${API_BASE_URL}/images/edits`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${API_KEY}`,
+        Authorization: `Bearer ${API_KEY}`,
       },
       body: JSON.stringify(body),
     });
@@ -31,20 +27,18 @@ export async function POST(request: NextRequest) {
     const contentType = response.headers.get('content-type') || '';
     const rawText = await response.text();
     const isJson = contentType.includes('application/json');
-    const parsed: unknown = isJson ? (() => { try { return JSON.parse(rawText); } catch { return null; } })() : null;
+    const parsed = isJson ? (() => { try { return JSON.parse(rawText); } catch { return null; } })() : null;
 
     if (!response.ok) {
-      type UpstreamJSON = Partial<ImageGenerationResponse> & { error?: { message?: string } } & { message?: string };
-      const p = parsed as UpstreamJSON | null;
+      const p = parsed as (Partial<ImageGenerationResponse> & { error?: { message?: string }, message?: string }) | null;
       const message = p?.error?.message || p?.message || rawText || `HTTP error! status: ${response.status}`;
       return NextResponse.json(
-        { error: { message } },
+        { error: { message, details: !isJson ? rawText.slice(0, 2000) : undefined } },
         { status: response.status }
       );
     }
 
     if (!parsed) {
-      // 上游未返回 JSON，提供原始文本帮助排查
       return NextResponse.json(
         { error: { message: '上游未返回JSON响应', details: rawText.slice(0, 2000) } },
         { status: 502 }
@@ -52,11 +46,10 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(parsed as ImageGenerationResponse);
-
   } catch (error) {
-    console.error('API Error:', error);
+    console.error('Inpaint API Error:', error);
     return NextResponse.json(
-      { error: { message: '服务器内部错误' } },
+      { error: { message: '局部重绘接口调用失败' } },
       { status: 500 }
     );
   }

@@ -58,7 +58,13 @@ yarn dev
 如需添加其他图片域名，请在 `next.config.ts` 中的 `images.remotePatterns` 数组中添加相应配置。
 
 ### 环境变量
-确保在 `api.txt` 文件中配置了正确的即梦API密钥和基础URL。
+请在项目根目录下创建 `.env.local`（不要提交到版本库），并配置：
+
+```
+DOUBAO_API_KEY=你的密钥
+DOUBAO_API_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+```
+后端路由会通过 `process.env.DOUBAO_API_KEY` 与 `process.env.DOUBAO_API_BASE_URL` 读取这些变量。
 
 ## 📁 项目结构
 
@@ -141,7 +147,7 @@ API配置位于 `src/app/api/generate/route.ts` 文件中。如需修改API密�
 
 - 全局样式: `src/app/globals.css`
 - 组件样式: 使用 Tailwind CSS 类名
-- 主题配置: `tailwind.config.js`
+- PostCSS: `postcss.config.mjs`
 
 ## 🚀 部署
 
@@ -158,6 +164,11 @@ API配置位于 `src/app/api/generate/route.ts` 文件中。如需修改API密�
 npm run build
 npm start
 ```
+
+如果在 Windows 上构建出现 `.tsbuildinfo` 写入权限错误，可尝试：
+- 确保工作目录在本地磁盘而非网络盘
+- 关闭杀毒软件对项目目录的拦截
+- 已在 `tsconfig.json` 中关闭 `incremental` 以避免写 `.tsbuildinfo`
 
 ## 📄 许可证
 

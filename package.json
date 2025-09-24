@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "ESLINT_NO_DEV_ERRORS=true next build --turbopack",
+    "build": "cross-env ESLINT_NO_DEV_ERRORS=true next build",
     "start": "next start",
     "lint": "eslint",
     "test": "jest",
@@ -44,6 +44,10 @@
     "jest-environment-jsdom": "^30.1.2",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.8",
-    "typescript": "^5"
+    "typescript": "^5",
+    "cross-env": "^7.0.3"
+  },
+  "overrides": {
+    "styled-jsx": "5.1.6"
   }
 }

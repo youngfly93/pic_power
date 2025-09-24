@@ -1,5 +1,5 @@
 // 即梦API集成层
-import { ImageGenerationRequest, ImageGenerationResponse, ImageGenerationError } from '@/types/api';
+import { ImageGenerationRequest, ImageGenerationResponse, ImageGenerationError, ImageEditRequest } from '@/types/api';
 
 export class ImageGenerationAPI {
   private static async makeRequest<T>(
@@ -29,7 +29,13 @@ export class ImageGenerationAPI {
     });
   }
 
-
+  static async editImage(request: ImageEditRequest): Promise<ImageGenerationResponse> {
+    // 局部重绘走专用后端路由，由后端转发到上游 /images/edits 或做必要适配
+    return this.makeRequest<ImageGenerationResponse>('/api/inpaint', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
 }
 
 // 默认配置
@@ -46,7 +52,7 @@ export const AVAILABLE_MODELS = [
   {
     id: 'doubao-seedream-4-0-250828',
     name: 'Seedream 4.0',
-    description: '高质量图像生成模型，支持多种风格',
+    description: '高质量图像生成与局部重绘（支持 mask）',
   },
 ];
 

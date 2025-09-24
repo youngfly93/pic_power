@@ -85,10 +85,10 @@ export const useAppStore = create<AppStore>()(
           clearError();
           setCurrentImages([]);
 
-          // 分支：局部重绘（无 inpaint，本地裁剪 + 指令编辑 + 合成）
+          // 分支：局部重绘（真实 inpaint：基图 + 遮罩，后端转发到上游 /images/edits）
           if (form.mode === 'local-edit') {
             if (!form.baseImageDataUrl || !form.maskImageDataUrl || !form.localEditRect) {
-              setError('请先选择基图并生成遮罩');
+              setError('请先选定区域并生成遮罩');
               setGenerating(false);
               return;
             }
@@ -104,159 +104,131 @@ export const useAppStore = create<AppStore>()(
             };
             addToHistory(historyItem);
 
-            const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-              const img = new Image();
-              img.crossOrigin = 'anonymous';
-              img.onload = () => resolve(img);
-              img.onerror = reject;
-              img.src = src;
-            });
-
-            // 整图编辑 + 仅在选区合成
-            const baseImg = await loadImage(form.baseImageDataUrl);
-            const rect = form.localEditRect;
-
-            const baseW = baseImg.naturalWidth || baseImg.width;
-            const baseH = baseImg.naturalHeight || baseImg.height;
-
-            // 根据接口约束选择 size：优先用与整图同宽高，若像素不足921600则同比例放大
-            const MIN_AREA = 921600;
-            const pickSize = (sel: string) => {
-              const wxh = sel.match(/^(\d+)x(\d+)$/);
-              if (wxh) {
-                let w = parseInt(wxh[1], 10), h = parseInt(wxh[2], 10);
-                if (w * h < MIN_AREA) {
-                  const scale = Math.ceil(Math.sqrt(MIN_AREA / (w * h)));
-                  w = w * scale; h = h * scale;
-                }
-                return `${w}x${h}`;
-              }
-              // 其他（含 1K/2K/4K/adaptive）统一按整图比例，保证不低于最小像素
-              let w = baseW, h = baseH;
-              if (w * h < MIN_AREA) {
-                const scale = Math.ceil(Math.sqrt(MIN_AREA / (w * h)));
-                w = Math.round(w * scale);
-                h = Math.round(h * scale);
-              }
-              return `${w}x${h}`;
-            };
-            const sizeForEdit = pickSize(form.size);
-
-            // 提示词优化：选框仅用于“指示目标对象”，允许为保持对象完整而略微越界；避免绘制矩形/高亮/遮罩。
-            const enhancedPrompt = `参考选框（整图坐标：x=${Math.round(rect.x)}, y=${Math.round(rect.y)}, width=${Math.round(rect.width)}, height=${Math.round(rect.height)}）定位其中的主要对象，并按如下要求进行修改：${form.prompt}。选框只是提示，不是硬边界`;
-
-            const request: import('@/types/api').ImageGenerationRequest = {
+            const editRequest: import('@/types/api').ImageEditRequest = {
               model: form.model,
-              prompt: enhancedPrompt,
-              size: sizeForEdit as import('@/types/api').ArkImageSize,
+              prompt: form.prompt,
+              size: form.size,
               watermark: form.watermark,
-              response_format: 'b64_json',
+              response_format: 'url',
               n: 1,
               image: [form.baseImageDataUrl],
+              mask: form.maskImageDataUrl,
               ...(form.seed !== undefined && form.seed !== -1 && { seed: form.seed }),
             };
 
-            const response = await ImageGenerationAPI.generateImages(request);
-            const b64 = response.data[0].b64_json || '';
-            const fullUrl = `data:image/png;base64,${b64}`;
-            const fullImg = await loadImage(fullUrl);
+            try {
+              const editResponse = await ImageGenerationAPI.editImage(editRequest);
 
-            // 合成：差异驱动的柔和遮罩。让模型可在目标边界略微越界，避免“硬矩形”。
-            const PAD = 24; // 额外容差（像素）
-            const BLUR_PX = 4; // 遮罩羽化
+              const generatedImages: GeneratedImage[] = (editResponse.data || []).map((item, index) => ({
+                id: `${historyId}_${index}`,
+                url: item.url || (item.b64_json ? `data:image/png;base64,${item.b64_json}` : ''),
+                prompt: form.prompt,
+                revisedPrompt: item.revised_prompt,
+                createdAt: new Date(),
+                size: form.size,
+                model: form.model,
+                type: 'local-edit' as const,
+                sourceImages: [form.baseImageDataUrl],
+              }));
 
-            // 1) 绘制基图与编辑后整图到缓冲
-            const baseBuf = document.createElement('canvas');
-            baseBuf.width = baseW; baseBuf.height = baseH;
-            const bctx = baseBuf.getContext('2d')!;
-            bctx.drawImage(baseImg, 0, 0, baseW, baseH);
+              if (generatedImages.length === 0 || !generatedImages[0].url) {
+                throw new Error('局部重绘未返回有效结果');
+              }
 
-            const editBuf = document.createElement('canvas');
-            editBuf.width = baseW; editBuf.height = baseH;
-            const ectx = editBuf.getContext('2d')!;
-            ectx.drawImage(fullImg, 0, 0, fullImg.width, fullImg.height, 0, 0, baseW, baseH);
+              setCurrentImages(generatedImages);
+              set((state) => ({
+                history: state.history.map((h) =>
+                  h.id === historyId
+                    ? { ...h, images: generatedImages, status: 'completed' as const }
+                    : h
+                ),
+              }));
+              return;
+            } catch (e) {
+              // 回退方案：使用 ROI 片段法，尽力给用户一个结果
+              try {
+                const rect = form.localEditRect;
+                const loadImage = (src: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+                  const img = new Image();
+                  img.onload = () => resolve(img);
+                  img.onerror = reject;
+                  img.src = src;
+                });
 
-            // 2) 仅在选框附近计算“变化”蒙版
-            const rx0 = Math.max(0, Math.floor(rect.x - PAD));
-            const ry0 = Math.max(0, Math.floor(rect.y - PAD));
-            const rw2 = Math.min(baseW - rx0, Math.ceil(rect.width + PAD * 2));
-            const rh2 = Math.min(baseH - ry0, Math.ceil(rect.height + PAD * 2));
+                const baseImg = await loadImage(form.baseImageDataUrl);
+                const roiCanvas = document.createElement('canvas');
+                roiCanvas.width = Math.max(1, Math.round(rect.width));
+                roiCanvas.height = Math.max(1, Math.round(rect.height));
+                const roiCtx = roiCanvas.getContext('2d')!;
+                roiCtx.drawImage(
+                  baseImg,
+                  Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height),
+                  0, 0, roiCanvas.width, roiCanvas.height
+                );
 
-            const baseData = bctx.getImageData(rx0, ry0, rw2, rh2);
-            const editData = ectx.getImageData(rx0, ry0, rw2, rh2);
-            const maskRoi = new ImageData(rw2, rh2);
+                // 尝试直接提交 ROI 作为参考图进行 image-to-image
+                const genRequest = {
+                  model: form.model,
+                  prompt: form.prompt,
+                  size: form.size,
+                  watermark: form.watermark,
+                  response_format: 'b64_json' as const,
+                  n: 1,
+                  image: [roiCanvas.toDataURL('image/png')],
+                  ...(form.seed !== undefined && form.seed !== -1 && { seed: form.seed }),
+                } as const;
+                const genResponse = await ImageGenerationAPI.generateImages(genRequest as unknown as import('@/types/api').ImageGenerationRequest);
+                const pieceB64 = genResponse.data?.[0]?.b64_json;
+                if (!pieceB64) throw new Error('回退方案未返回有效结果');
 
-            // 阈值区间：更平滑的 alpha（0..1）
-            const T0 = 12; // 无视小噪声
-            const T1 = 40; // 明显变化
-            for (let y1 = 0; y1 < rh2; y1++) {
-              for (let x1 = 0; x1 < rw2; x1++) {
-                const idx = (y1 * rw2 + x1) * 4;
-                const r0 = baseData.data[idx],   g0 = baseData.data[idx+1], b0 = baseData.data[idx+2];
-                const r1 = editData.data[idx],   g1 = editData.data[idx+1], b1 = editData.data[idx+2];
-                const d = (Math.abs(r1 - r0) + Math.abs(g1 - g0) + Math.abs(b1 - b0)) / 3;
-                let a = 0;
-                if (d > T0) a = Math.min(1, (d - T0) / (T1 - T0));
-                const a255 = Math.round(a * 255);
-                maskRoi.data[idx] = 255;
-                maskRoi.data[idx+1] = 255;
-                maskRoi.data[idx+2] = 255;
-                maskRoi.data[idx+3] = a255;
+                const pieceUrl = `data:image/png;base64,${pieceB64}`;
+                const pieceImg = await loadImage(pieceUrl);
+                const outCanvas = document.createElement('canvas');
+                outCanvas.width = baseImg.naturalWidth;
+                outCanvas.height = baseImg.naturalHeight;
+                const outCtx = outCanvas.getContext('2d')!;
+                outCtx.drawImage(baseImg, 0, 0);
+                outCtx.drawImage(pieceImg, Math.round(rect.x), Math.round(rect.y), Math.round(rect.width), Math.round(rect.height));
+                const outUrl = outCanvas.toDataURL('image/png');
+
+                const generatedImages: GeneratedImage[] = [
+                  {
+                    id: `${historyId}_0`,
+                    url: outUrl,
+                    prompt: form.prompt,
+                    revisedPrompt: genResponse.data?.[0]?.revised_prompt,
+                    createdAt: new Date(),
+                    size: form.size,
+                    model: form.model,
+                    type: 'local-edit' as const,
+                    sourceImages: [form.baseImageDataUrl],
+                  },
+                ];
+
+                setCurrentImages(generatedImages);
+                set((state) => ({
+                  history: state.history.map((h) =>
+                    h.id === historyId
+                      ? { ...h, images: generatedImages, status: 'completed' as const }
+                      : h
+                  ),
+                }));
+                return;
+              } catch (fbErr) {
+                const message = fbErr instanceof Error ? fbErr.message : '局部重绘失败';
+                setError(message);
+                set((state) => ({
+                  history: state.history.map((h) =>
+                    h.id === historyId
+                      ? { ...h, status: 'failed' as const, error: message }
+                      : h
+                  ),
+                }));
+                setGenerating(false);
+                return;
               }
             }
-
-            // 3) 将 ROI 蒙版放到整图蒙版并做羽化
-            const maskCanvas = document.createElement('canvas');
-            maskCanvas.width = baseW; maskCanvas.height = baseH;
-            const mctx = maskCanvas.getContext('2d')!;
-            const roiCanvas = document.createElement('canvas');
-            roiCanvas.width = rw2; roiCanvas.height = rh2;
-            const roictx = roiCanvas.getContext('2d')!;
-            roictx.putImageData(maskRoi, 0, 0);
-            mctx.filter = `blur(${BLUR_PX}px)`;
-            mctx.drawImage(roiCanvas, rx0, ry0);
-            mctx.filter = 'none';
-
-            // 4) 用蒙版裁剪编辑后的整图
-            const regionCanvas = document.createElement('canvas');
-            regionCanvas.width = baseW; regionCanvas.height = baseH;
-            const rctx = regionCanvas.getContext('2d')!;
-            rctx.drawImage(editBuf, 0, 0);
-            rctx.globalCompositeOperation = 'destination-in';
-            rctx.drawImage(maskCanvas, 0, 0);
-            rctx.globalCompositeOperation = 'source-over';
-
-            // 5) 与基图合成
-            const outCanvas = document.createElement('canvas');
-            outCanvas.width = baseW; outCanvas.height = baseH;
-            const octx = outCanvas.getContext('2d')!;
-            octx.drawImage(baseBuf, 0, 0);
-            octx.drawImage(regionCanvas, 0, 0);
-            const mergedUrl = outCanvas.toDataURL('image/png');
-
-            const generatedImages: GeneratedImage[] = [{
-              id: `${historyId}_0`,
-              url: mergedUrl,
-              prompt: form.prompt,
-              revisedPrompt: response.data[0].revised_prompt,
-              createdAt: new Date(),
-              size: form.size,
-              model: form.model,
-              type: 'local-edit',
-              sourceImages: [form.baseImageDataUrl],
-            }];
-
-            setCurrentImages(generatedImages);
-            set((state) => ({
-              history: state.history.map(h =>
-                h.id === historyId
-                  ? { ...h, images: generatedImages, status: 'completed' as const }
-                  : h
-              )
-            }));
-            return;
           }
-
           // 处理参考图片（如果是图片编辑模式）
           let imageUrls: string[] = [];
           if (form.mode === 'image-to-image' && form.referenceImages) {
@@ -346,11 +318,65 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: 'pic-power-storage',
+      // 仅持久化精简后的小体积数据，避免将 base64 等大字段写入 localStorage
       partialize: (state) => ({
-        history: state.history,
+        history: (state.history || []).map((h) => ({
+          id: h.id,
+          prompt: h.prompt,
+          createdAt: h.createdAt instanceof Date ? h.createdAt.toISOString() : (h.createdAt as unknown as string),
+          status: h.status,
+          error: h.error,
+          type: h.type,
+          // 不持久化 sourceImages（可能包含大体积 base64）
+          images: (h.images || []).map((img) => ({
+            id: img.id,
+            prompt: img.prompt,
+            // 如果是 data: 开头的 base64，持久化时置空，避免占用配额
+            url: img.url && img.url.startsWith('data:') ? '' : img.url,
+            revisedPrompt: img.revisedPrompt,
+            createdAt: img.createdAt instanceof Date ? img.createdAt.toISOString() : (img.createdAt as unknown as string),
+            size: img.size,
+            model: img.model,
+            type: img.type,
+          })),
+        })),
         selectedSize: state.selectedSize,
         selectedModel: state.selectedModel,
       }),
+      // 将 ISO 字符串反序列化为 Date
+      migrate: (persistedState: unknown) => {
+        type PersistedImage = Omit<GeneratedImage, 'createdAt'> & { createdAt: string | Date };
+        type PersistedHistory = Omit<GenerationHistory, 'createdAt' | 'images'> & {
+          createdAt: string | Date;
+          images: PersistedImage[];
+        };
+        type PersistedState = {
+          history?: PersistedHistory[];
+          selectedSize?: AppState['selectedSize'];
+          selectedModel?: string;
+        };
+
+        const toDate = (value: string | Date | undefined): Date => {
+          if (value instanceof Date) return value;
+          if (typeof value === 'string') return new Date(value);
+          return new Date();
+        };
+
+        const next = { ...(persistedState as PersistedState) };
+        if (Array.isArray(next.history)) {
+          next.history = next.history.map((h) => ({
+            ...h,
+            createdAt: toDate(h?.createdAt),
+            images: Array.isArray(h?.images)
+              ? h.images.map((img) => ({
+                  ...img,
+                  createdAt: toDate(img?.createdAt),
+                }))
+              : [],
+          }));
+        }
+        return next as unknown;
+      },
     }
   )
 );

@@ -26,20 +26,23 @@ export function ImageResultCard({
   onPreview,
   onDownload,
 }: ImageResultCardProps) {
-  const isI2I = image.type === "image-to-image" && image.sourceImages && image.sourceImages.length > 0;
+  const hasBeforeImage =
+    (image.type === "image-to-image" || image.type === "local-edit") &&
+    image.sourceImages &&
+    image.sourceImages.length > 0;
   const [showSideBySide, setShowSideBySide] = useState(false);
 
   return (
     <Card className="group overflow-hidden image-gallery-card">
       <CardContent className="p-0">
         {/* 顶部展示区 */}
-        {isI2I ? (
+        {hasBeforeImage ? (
           <div className="space-y-4">
             <ImageComparisonSlider
               beforeImage={image.sourceImages![0]}
               afterImage={image.url}
               beforeLabel="原图"
-              afterLabel="AI编辑后"
+              afterLabel={image.type === "local-edit" ? "局部重绘" : "AI编辑"}
               prompt={image.prompt}
               onDownload={onDownload}
             />

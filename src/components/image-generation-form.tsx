@@ -50,6 +50,7 @@ export function ImageGenerationFormComponent() {
   const [seed, setSeed] = useState<number>(-1);
   const [localBasePreview, setLocalBasePreview] = useState<string | null>(null);
   const [localMaskPreview, setLocalMaskPreview] = useState<string | null>(null);
+  const [localMaskRect, setLocalMaskRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const watermark = false; // 确保无水印
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -64,8 +65,22 @@ export function ImageGenerationFormComponent() {
       return;
     }
 
-    // 原型阶段：局部编辑不提交后端，仅导出遮罩
+    // 局部重绘：需要基图与遮罩，提交 /images/edits
     if (mode === 'local-edit') {
+      if (!localBasePreview || !localMaskPreview || !localMaskRect) return;
+      const form: ImageGenerationForm = {
+        prompt: currentPrompt,
+        size: selectedSize,
+        model: selectedModel,
+        maxImages,
+        watermark,
+        mode: 'local-edit',
+        seed: seed === -1 ? undefined : seed,
+        baseImageDataUrl: localBasePreview,
+        maskImageDataUrl: localMaskPreview,
+        localEditRect: localMaskRect,
+      };
+      await generateImages(form);
       return;
     }
 
@@ -152,6 +167,7 @@ export function ImageGenerationFormComponent() {
                 onImagesChange={(files) => {
                   setReferenceImages(files);
                   setLocalMaskPreview(null);
+                  setLocalMaskRect(null);
                 }}
                 onPreviewsUpdate={(previews) => {
                   setLocalBasePreview(previews[0] || null);
@@ -162,11 +178,11 @@ export function ImageGenerationFormComponent() {
               {localBasePreview && (
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
-                    拖拽选择局部区域，点击“生成遮罩预览”导出白/黑遮罩；当前阶段仅生成并预览遮罩，不提交后端。
+                    拖拽选择局部区域后会自动导出白/黑遮罩，必要时点击“重新生成遮罩”微调；遮罩就绪后即可点击下方按钮进行局部重绘。
                   </p>
                   <RegionSelectorCanvas
                     imageSrc={localBasePreview}
-                    onMaskChange={(maskUrl) => setLocalMaskPreview(maskUrl)}
+                    onMaskChange={(maskUrl, rect) => { setLocalMaskPreview(maskUrl); setLocalMaskRect(rect); }}
                   />
                 </div>
               )}
@@ -322,7 +338,7 @@ export function ImageGenerationFormComponent() {
               isGenerating ||
               !currentPrompt.trim() ||
               (mode === 'image-to-image' && referenceImages.length === 0) ||
-              (mode === 'local-edit')
+              (mode === 'local-edit' && (!localBasePreview || !localMaskPreview))
             }
           >
             {isGenerating ? (
@@ -340,7 +356,7 @@ export function ImageGenerationFormComponent() {
                 ) : mode === 'local-edit' ? (
                   <>
                     <Crop className="mr-2 h-4 w-4" />
-                    局部编辑原型：请在上方生成遮罩
+                    生成局部重绘
                   </>
                 ) : (
                   <>

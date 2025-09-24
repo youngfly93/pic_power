@@ -197,19 +197,22 @@ export function GenerationHistory({ className }: GenerationHistoryProps) {
               {/* 预览图片 */}
               {item.status === 'completed' && item.images.length > 0 && (
                 <div className="flex gap-1 mt-2">
-                  {item.images.slice(0, 3).map((image, index) => (
-                    <div
-                      key={image.id}
-                      className="relative w-12 h-12 rounded overflow-hidden border"
-                    >
-                      <Image
-                        src={image.url}
-                        alt={`预览 ${index + 1}`}
-                        fill
-                        className="object-cover"
-                        sizes="48px"
-                      />
-                    </div>
+                  {item.images
+                    .filter(img => !!img.url)
+                    .slice(0, 3)
+                    .map((image, index) => (
+                      <div
+                        key={image.id}
+                        className="relative w-12 h-12 rounded overflow-hidden border"
+                      >
+                        <Image
+                          src={image.url}
+                          alt={`预览 ${index + 1}`}
+                          fill
+                          className="object-cover"
+                          sizes="48px"
+                        />
+                      </div>
                   ))}
                   {item.images.length > 3 && (
                     <div className="w-12 h-12 rounded border flex items-center justify-center bg-muted text-xs">
@@ -242,23 +245,25 @@ export function GenerationHistory({ className }: GenerationHistoryProps) {
                 <div>
                   <h4 className="font-semibold mb-2">生成结果 ({selectedHistory.images.length} 张)</h4>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                    {selectedHistory.images.map((image) => (
-                      <div key={image.id} className="space-y-2">
-                        <div className="relative aspect-square rounded-lg overflow-hidden border">
-                          <Image
-                            src={image.url}
-                            alt={image.prompt}
-                            fill
-                            className="object-cover"
-                            sizes="(max-width: 768px) 50vw, 33vw"
-                          />
+                    {selectedHistory.images
+                      .filter(img => !!img.url)
+                      .map((image) => (
+                        <div key={image.id} className="space-y-2">
+                          <div className="relative aspect-square rounded-lg overflow-hidden border">
+                            <Image
+                              src={image.url}
+                              alt={image.prompt}
+                              fill
+                              className="object-cover"
+                              sizes="(max-width: 768px) 50vw, 33vw"
+                            />
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            <div>{image.size} • {image.model.split('-')[1]}</div>
+                            <div>{image.createdAt.toLocaleString()}</div>
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          <div>{image.size} • {image.model.split('-')[1]}</div>
-                          <div>{image.createdAt.toLocaleString()}</div>
-                        </div>
-                      </div>
-                    ))}
+                      ))}
                   </div>
                 </div>
               </div>

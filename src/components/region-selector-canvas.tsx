@@ -14,6 +14,7 @@ export interface RegionSelectorCanvasProps {
 export function RegionSelectorCanvas({ imageSrc, onMaskChange, className }: RegionSelectorCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
+  const maskChangeRef = useRef(onMaskChange);
 
   const [naturalSize, setNaturalSize] = useState<{ width: number; height: number } | null>(null);
   const [displaySize, setDisplaySize] = useState<{ width: number; height: number } | null>(null);
@@ -45,24 +46,37 @@ export function RegionSelectorCanvas({ imageSrc, onMaskChange, className }: Regi
     };
   }, [updateLayout]);
 
+  useEffect(() => {
+    maskChangeRef.current = onMaskChange;
+  }, [onMaskChange]);
+
   const scale = useMemo(() => {
     if (!naturalSize || !displaySize) return 1;
-    // object-contain 等比缩放，宽高缩放比一致
-    return displaySize.width / naturalSize.width;
+    // object-contain: 实际内容缩放系数 = min(宽比, 高比)
+    const sw = displaySize.width / naturalSize.width;
+    const sh = displaySize.height / naturalSize.height;
+    return Math.min(sw, sh);
   }, [naturalSize, displaySize]);
 
   const toImageCoords = useCallback(
     (clientX: number, clientY: number) => {
       if (!imgRef.current || !displaySize || !naturalSize) return null;
-      // 将页面坐标转换到图片显示坐标
-      const xInImg = clientX - imgOffset.left;
-      const yInImg = clientY - imgOffset.top;
-      // 限制在图片显示范围内
-      const x = Math.max(0, Math.min(displaySize.width, xInImg));
-      const y = Math.max(0, Math.min(displaySize.height, yInImg));
+      // 以图片元素的可视内容区域为准（object-contain 会产生 letterbox 内边距）
+      const boxLeft = imgOffset.left;
+      const boxTop = imgOffset.top;
+      const contentW = naturalSize.width * scale;
+      const contentH = naturalSize.height * scale;
+      const padX = (displaySize.width - contentW) / 2;
+      const padY = (displaySize.height - contentH) / 2;
+
+      const xInBox = clientX - boxLeft;
+      const yInBox = clientY - boxTop;
+      // 限制在内容区域内
+      const x = Math.max(padX, Math.min(displaySize.width - padX, xInBox));
+      const y = Math.max(padY, Math.min(displaySize.height - padY, yInBox));
       return { x, y };
     },
-    [imgOffset, displaySize, naturalSize]
+    [imgOffset, displaySize, naturalSize, scale]
   );
 
   const onMouseDown = useCallback(
@@ -90,39 +104,50 @@ export function RegionSelectorCanvas({ imageSrc, onMaskChange, className }: Regi
     [dragging, startPt, toImageCoords]
   );
 
-  const onMouseUp = useCallback(() => {
-    setDragging(false);
-  }, []);
-
-  const resetSelection = useCallback(() => {
-    setRect(null);
-    setMaskUrl(null);
-    onMaskChange?.("", { x: 0, y: 0, width: 0, height: 0 });
-  }, [onMaskChange]);
-
   const exportMask = useCallback(() => {
-    if (!rect || !naturalSize || !scale) return;
-    // 将显示坐标 rect 转为原图坐标
-    const rx = Math.round(rect.x / scale);
-    const ry = Math.round(rect.y / scale);
+    if (!rect || !naturalSize || !displaySize || !scale) return;
+    const contentW = naturalSize.width * scale;
+    const contentH = naturalSize.height * scale;
+    const padX = (displaySize.width - contentW) / 2;
+    const padY = (displaySize.height - contentH) / 2;
+    const rx = Math.round((rect.x - padX) / scale);
+    const ry = Math.round((rect.y - padY) / scale);
     const rw = Math.round(rect.width / scale);
     const rh = Math.round(rect.height / scale);
+    if (rw <= 0 || rh <= 0) {
+      setMaskUrl(null);
+      maskChangeRef.current?.("", { x: 0, y: 0, width: 0, height: 0 });
+      return;
+    }
 
     const canvas = document.createElement("canvas");
     canvas.width = naturalSize.width;
     canvas.height = naturalSize.height;
     const ctx = canvas.getContext("2d")!;
-    // 黑底
     ctx.fillStyle = "black";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // 白色选区
     ctx.fillStyle = "white";
     ctx.fillRect(rx, ry, rw, rh);
 
     const url = canvas.toDataURL("image/png");
     setMaskUrl(url);
-    onMaskChange?.(url, { x: rx, y: ry, width: rw, height: rh });
-  }, [rect, naturalSize, scale, onMaskChange]);
+    maskChangeRef.current?.(url, { x: rx, y: ry, width: rw, height: rh });
+  }, [rect, naturalSize, displaySize, scale]);
+
+  const onMouseUp = useCallback(() => {
+    setDragging(false);
+    exportMask();
+  }, [exportMask]);
+
+  const resetSelection = useCallback(() => {
+    setRect(null);
+    setMaskUrl(null);
+    maskChangeRef.current?.("", { x: 0, y: 0, width: 0, height: 0 });
+  }, []);
+
+  useEffect(() => {
+    resetSelection();
+  }, [imageSrc, resetSelection]);
 
   const downloadMask = useCallback(() => {
     if (!maskUrl) return;
@@ -175,7 +200,7 @@ export function RegionSelectorCanvas({ imageSrc, onMaskChange, className }: Regi
               重置选区
             </Button>
             <Button type="button" onClick={exportMask} disabled={!rect || !naturalSize}>
-              生成遮罩预览
+              重新生成遮罩
             </Button>
             <Button type="button" variant="outline" onClick={downloadMask} disabled={!maskUrl}>
               下载遮罩 PNG
